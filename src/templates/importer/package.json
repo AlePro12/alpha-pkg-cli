@@ -1,0 +1,11 @@
+{
+  "name": "{keyName}",
+  "version": "0.1.0",
+  "description": "{description}",
+  "author": "{author}",
+  "private": true,
+  "license": "UNLICENSED",
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}

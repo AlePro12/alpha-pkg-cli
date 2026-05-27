@@ -1,0 +1,26 @@
+{
+  "name": "{keyNamePascal}",
+  "version": "0.1.0",
+  "author": "{author}",
+  "description": "{description}",
+  "category": "utils",
+  "minVersion": "0.9.10",
+  "main": [
+    {
+      "routeName": "api",
+      "routePath": "index.js",
+      "hotReload": true
+    }
+  ],
+  "downbar": [
+    {
+      "opcName": "{keyNamePascal}Widget",
+      "opcPath": "downbar",
+      "opcMain": "index",
+      "opcFile": "widget",
+      "Icon": "ph:bell"
+    }
+  ],
+  "requiresCores": [],
+  "npmInstall": false
+}

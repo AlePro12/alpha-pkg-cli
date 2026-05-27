@@ -1,0 +1,8 @@
+# .encryptIgnore — patrones (glob simple) de archivos a NO encriptar.
+# package.json y node_modules siempre se ignoran sin necesidad de listarlos.
+# Una línea por patrón. # para comentarios.
+
+# Ejemplos:
+# docs/*.md
+# secrets.json
+# dist/*.bundle.js

@@ -1,0 +1,230 @@
+// Reporte AlphaReport Engine: {keyNamePascal}
+//
+// Estructura de un .arpt:
+//   exports.metadata    → objeto o función async (parámetros del formulario)
+//   exports.generatePDF → opcional, react-pdf (declarativo, OK <500 filas)
+//   exports.generatePdfKit → opcional, pdfkit (imperativo, 60x más rápido)
+//   exports.generateExcel  → opcional, exceljs
+//
+// Si exportas `generatePdfKit`, el engine lo prefiere sobre `generatePDF`
+// automáticamente. Para datasets grandes (>500 filas) usa pdfkit.
+//
+// Hot-reload: el engine recarga el .arpt al guardar; no necesitas restart.
+
+const React = require("react");
+const {
+  Document,
+  Page,
+  Text,
+  View,
+  StyleSheet,
+} = require("@react-pdf/renderer");
+
+// ─── 1. METADATA ─────────────────────────────────────────────────────────────
+// Puede ser un objeto plano O una función async que recibe `ctx` para cargar
+// opciones desde la DB (ej. lista dinámica de almacenes).
+exports.metadata = {
+  name: "{keyNamePascal}",
+  description: "{description}",
+  parameters: [
+    {
+      name: "Titulo",
+      type: "text",
+      label: "Título del reporte",
+      default: "{keyNamePascal}",
+      required: true,
+      minLength: 1,
+      maxLength: 80,
+    },
+    {
+      name: "FechaInicio",
+      type: "date",
+      label: "Desde",
+      default: "",
+      required: true,
+    },
+    {
+      name: "FechaFin",
+      type: "date",
+      label: "Hasta",
+      default: "",
+      required: true,
+      validate: (value, allValues) => {
+        if (allValues.FechaInicio && value && value < allValues.FechaInicio) {
+          return "Debe ser posterior a la fecha inicio";
+        }
+        return null;
+      },
+    },
+    {
+      name: "IncluirInactivos",
+      type: "checkbox",
+      label: "Incluir registros inactivos",
+      default: false,
+    },
+  ],
+};
+
+// Ejemplo de metadata dinámica (descomenta y borra el objeto de arriba):
+//
+// exports.metadata = async function (ctx) {
+//   const { models, empresaId } = ctx;
+//   let almacenes = ["01"];
+//   try {
+//     const Almacenes = models.getModel("Almacenes");
+//     const rows = await Almacenes
+//       .find({ empresa: empresaId })
+//       .select("Codp Descripcion")
+//       .lean();
+//     almacenes = rows.map((a) => `${a.Codp} - ${a.Descripcion}`);
+//   } catch (e) {
+//     ctx.warn("No se pudieron cargar almacenes: " + e.message);
+//   }
+//   return {
+//     name: "{keyNamePascal}",
+//     description: "{description}",
+//     parameters: [
+//       { name: "Almacen", type: "select", label: "Almacén",
+//         options: almacenes, default: almacenes[0] },
+//     ],
+//   };
+// };
+
+// ─── 2. HELPERS COMPARTIDOS ──────────────────────────────────────────────────
+// Mejor práctica: extraer la query a un helper que las dos funciones (PDF y
+// Excel) puedan reusar. Evita duplicación y desincronización.
+
+async function loadData(ctx) {
+  const { params, models, empresaId } = ctx;
+  // TODO: reemplaza por tu colección real, p.ej.:
+  //   return await models.Facturas.find({
+  //     empresa: empresaId,
+  //     Fecha: { $gte: new Date(params.FechaInicio), $lte: new Date(params.FechaFin) },
+  //     ...(params.IncluirInactivos ? {} : { Activo: true }),
+  //   }).limit(2000).lean();
+  return [
+    { Codp: "P0001", Descripcion: "Producto demo 1", Cantidad: 12, Total: 145.5 },
+    { Codp: "P0002", Descripcion: "Producto demo 2", Cantidad: 7, Total: 98.0 },
+  ];
+}
+
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("es-VE") : "");
+const fmtNum = (n) => (typeof n === "number" ? n.toFixed(2) : "");
+
+// ─── 3. PDF — react-pdf (declarativo) ────────────────────────────────────────
+const styles = StyleSheet.create({
+  page: { padding: 30, fontSize: 10, fontFamily: "Helvetica" },
+  header: { fontSize: 14, fontWeight: "bold", marginBottom: 4 },
+  subheader: { fontSize: 9, color: "#555", marginBottom: 12 },
+  table: { marginTop: 8, borderTop: "1px solid #999", borderLeft: "1px solid #999" },
+  row: { flexDirection: "row", borderBottom: "1px solid #ccc" },
+  headerRow: { backgroundColor: "#eee", fontWeight: "bold" },
+  cell: { padding: 4, borderRight: "1px solid #ccc" },
+});
+
+exports.generatePDF = async function (ctx) {
+  const { params, getEmpresaInfo } = ctx;
+  const empresa = await getEmpresaInfo();
+  const rows = await loadData(ctx);
+
+  return (
+    <Document>
+      <Page size="LETTER" style={styles.page}>
+        <Text style={styles.header}>
+          {empresa?.nombre} — {params.Titulo}
+        </Text>
+        <Text style={styles.subheader}>
+          {fmtDate(params.FechaInicio)} — {fmtDate(params.FechaFin)}
+          {empresa?.rif ? `   ·   ${empresa.rif}` : ""}
+        </Text>
+
+        <View style={styles.table}>
+          <View style={[styles.row, styles.headerRow]}>
+            <Text style={[styles.cell, { width: "15%" }]}>Código</Text>
+            <Text style={[styles.cell, { width: "55%" }]}>Descripción</Text>
+            <Text style={[styles.cell, { width: "15%", textAlign: "right" }]}>Cantidad</Text>
+            <Text style={[styles.cell, { width: "15%", textAlign: "right" }]}>Total</Text>
+          </View>
+          {rows.map((r, i) => (
+            <View key={i} style={styles.row}>
+              <Text style={[styles.cell, { width: "15%" }]}>{r.Codp}</Text>
+              <Text style={[styles.cell, { width: "55%" }]}>{r.Descripcion}</Text>
+              <Text style={[styles.cell, { width: "15%", textAlign: "right" }]}>{r.Cantidad}</Text>
+              <Text style={[styles.cell, { width: "15%", textAlign: "right" }]}>{fmtNum(r.Total)}</Text>
+            </View>
+          ))}
+        </View>
+      </Page>
+    </Document>
+  );
+};
+
+// ─── 4. EXCEL — exceljs ──────────────────────────────────────────────────────
+exports.generateExcel = async function (ctx) {
+  const ExcelJS = require("exceljs");
+  const { params, getEmpresaInfo } = ctx;
+  const empresa = await getEmpresaInfo();
+  const rows = await loadData(ctx);
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("{keyNamePascal}");
+
+  ws.addRow([empresa?.nombre || ""]);
+  ws.addRow([params.Titulo]);
+  ws.addRow([`${fmtDate(params.FechaInicio)} — ${fmtDate(params.FechaFin)}`]);
+  ws.addRow([]);
+
+  ws.addRow(["Código", "Descripción", "Cantidad", "Total"]);
+  rows.forEach((r) => ws.addRow([r.Codp, r.Descripcion, r.Cantidad, r.Total]));
+
+  ws.getRow(5).font = { bold: true };
+  ws.columns = [{ width: 14 }, { width: 40 }, { width: 12 }, { width: 14 }];
+  ws.getColumn(3).numFmt = "#,##0";
+  ws.getColumn(4).numFmt = "#,##0.00";
+
+  return await wb.xlsx.writeBuffer();
+};
+
+// ─── 5. PDFKIT — opcional, para datasets grandes (>500 filas) ────────────────
+// Descomenta para reportes con miles de filas. Es 60x más rápido que react-pdf.
+//
+// exports.generatePdfKit = async function (ctx, outputPath) {
+//   const { createPdf, drawHeader, drawFooter, Table } = require(ctx.utilsPath);
+//   const { params, getEmpresaInfo } = ctx;
+//   const empresa = await getEmpresaInfo();
+//   const rows = await loadData(ctx);
+//
+//   const pdf = createPdf({ size: "LETTER", layout: "landscape" });
+//   const doc = pdf.raw;
+//
+//   const drawPageHeader = () =>
+//     drawHeader(doc, {
+//       empresa,
+//       title: params.Titulo,
+//       subTitle: `${fmtDate(params.FechaInicio)} — ${fmtDate(params.FechaFin)}`,
+//       y: 15,
+//       width: 752,
+//       marginLeft: 15,
+//     });
+//
+//   const table = new Table(doc, { marginLeft: 15 });
+//   table
+//     .setColumns([
+//       { key: "Codp", header: "Código", width: 80 },
+//       { key: "Descripcion", header: "Descripción", width: 360 },
+//       { key: "Cantidad", header: "Cantidad", width: 80, align: "right" },
+//       { key: "Total", header: "Total", width: 80, align: "right", formatter: fmtNum },
+//     ])
+//     .setStyles({ headerBg: "#e0e0e0", alternateRowBg: "#fafafa", rowHeight: 12 })
+//     .setOnNewPage((doc) => drawPageHeader())
+//     .draw(rows, drawPageHeader())
+//     .drawTotals({
+//       Descripcion: "TOTAL",
+//       Cantidad: rows.reduce((s, r) => s + (r.Cantidad || 0), 0),
+//       Total: rows.reduce((s, r) => s + (r.Total || 0), 0),
+//     });
+//
+//   drawFooter(doc, { text: params.Titulo, includePageNumbers: true });
+//   await pdf.save(outputPath);
+//   return outputPath;
+// };

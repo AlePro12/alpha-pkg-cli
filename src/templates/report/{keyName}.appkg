@@ -1,0 +1,13 @@
+{
+  "name": "{keyNamePascal}",
+  "version": "0.1.0",
+  "author": "{author}",
+  "description": "{description}",
+  "category": "reports",
+  "minVersion": "0.9.10",
+  "engine": "arpt",
+  "report": true,
+  "arptFile": "{keyName}.arpt",
+  "requiresCores": ["ReporCore"],
+  "npmInstall": false
+}

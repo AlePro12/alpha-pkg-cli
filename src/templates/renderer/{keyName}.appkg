@@ -1,0 +1,20 @@
+{
+  "name": "{keyNamePascal}",
+  "version": "0.1.0",
+  "author": "{author}",
+  "description": "{description}",
+  "category": "utils",
+  "minVersion": "0.9.10",
+  "renderer": [
+    {
+      "opcName": "{keyNamePascal}",
+      "opcPath": "renderer",
+      "opcMain": "index",
+      "opcFile": "render",
+      "opcType": "page",
+      "Icon": "ph:cube"
+    }
+  ],
+  "requiresCores": [],
+  "npmInstall": false
+}

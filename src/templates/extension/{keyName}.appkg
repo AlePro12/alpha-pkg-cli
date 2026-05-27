@@ -1,0 +1,46 @@
+{
+  "name": "{keyNamePascal}",
+  "version": "0.1.0",
+  "author": "{author}",
+  "description": "{description}",
+  "category": "integrations",
+  "minVersion": "0.9.10",
+  "main": [
+    {
+      "routeName": "api",
+      "routePath": "index.js",
+      "hotReload": true
+    }
+  ],
+  "extensions": [
+    {
+      "model": "VenCore/Facturas",
+      "fields": [
+        {
+          "name": "MedicoTratante",
+          "label": "Médico Tratante",
+          "type": "String",
+          "ui": "TextField"
+        },
+        {
+          "name": "PacienteCodigo",
+          "label": "Paciente",
+          "type": "String",
+          "ui": "SelectBy",
+          "selectByProps": {
+            "Url": "/pkgs/{keyName}/api/pacientes",
+            "OtherFields": ["Nombre", "Cedula"]
+          }
+        }
+      ],
+      "events": [
+        {
+          "on": "onClienteChange",
+          "action": "Factura.Totalizar = Factura.Totalizar || {}; Factura.Totalizar.ExtraData = Factura.Totalizar.ExtraData || {}; if (sourceValue && sourceValue.Nombre) { Factura.Totalizar.ExtraData.ClienteNombre = sourceValue.Nombre; } return Factura;"
+        }
+      ]
+    }
+  ],
+  "requiresCores": ["VenCore"],
+  "npmInstall": false
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@alphasoft/alpha-pkg",
+  "version": "0.1.0",
+  "description": "CLI para desarrollar, validar, empaquetar y publicar extensiones de Alpha Administrativo",
+  "bin": {
+    "alpha-pkg": "./bin/alpha-pkg.js"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node bin/alpha-pkg.js",
+    "test": "node tests/run.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "alpha",
+    "alphasoft",
+    "alphaadmin",
+    "packages",
+    "extensions",
+    "cli"
+  ],
+  "author": "AlphaSoft, C.A.",
+  "license": "MIT",
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "axios": "^1.7.7",
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "form-data": "^4.0.1",
+    "ora": "^5.4.1",
+    "prompts": "^2.4.2",
+    "semver": "^7.6.3"
+  }
+}
