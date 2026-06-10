@@ -1,6 +1,6 @@
 {
   "name": "@alphasoft/alpha-pkg",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI para desarrollar, validar, empaquetar y publicar extensiones de Alpha Administrativo",
   "bin": {
     "alpha-pkg": "./bin/alpha-pkg.js"
