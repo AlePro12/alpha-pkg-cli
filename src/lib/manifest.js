@@ -81,6 +81,12 @@ function validateManifest(manifest, pkgDir) {
     );
   }
 
+  // internal: paquete privado que no aparece en el catálogo público; solo se
+  // instala en los ActCodes que el admin active desde el panel del store.
+  if (manifest.internal !== undefined && typeof manifest.internal !== "boolean") {
+    err("`internal` debe ser true o false");
+  }
+
   // engine: "arpt" → reporte AlphaReport Engine (no usa main/renderer)
   if (manifest.engine === "arpt") {
     if (!manifest.arptFile) err("`arptFile` requerido cuando `engine: \"arpt\"`");
@@ -133,10 +139,13 @@ function validateManifest(manifest, pkgDir) {
         if (!r.opcFile) err(`renderer[${i}].opcFile requerido`);
         if (!r.opcPath) err(`renderer[${i}].opcPath requerido`);
         if (pkgDir && r.opcFile && r.opcPath) {
-          const filePath = path.join(pkgDir, r.opcPath, r.opcFile + ".js");
+          // `opcFile` se declara sin extensión (convención de los templates),
+          // pero toleramos que el usuario incluya ".js" para no romper el lint.
+          const base = r.opcFile.endsWith(".js") ? r.opcFile.slice(0, -3) : r.opcFile;
+          const filePath = path.join(pkgDir, r.opcPath, base + ".js");
           const encryptedPath = filePath + "-alpcrt";
           if (!fs.existsSync(filePath) && !fs.existsSync(encryptedPath)) {
-            err(`renderer[${i}].opcFile no existe: ${r.opcPath}/${r.opcFile}.js`);
+            err(`renderer[${i}].opcFile no existe: ${r.opcPath}/${base}.js`);
           }
         }
       });

@@ -58,7 +58,7 @@ async function publish(targetPath, opts) {
     const result = await build(targetPath, {
       bump: opts.bump || "none",
       output: "./dist",
-      lint: true,
+      lint: opts.lint !== false,
     });
     zipPath = result.zipPath;
     // re-leer manifest tras el bump
@@ -134,6 +134,7 @@ async function publish(targetPath, opts) {
         requiresCores: manifest.requiresCores || [],
         npmInstall: !!manifest.npmInstall,
         isReport: !!manifest.report,
+        internal: !!manifest.internal,
         // encryptOnDownload default = false; el admin lo activa en el panel
       });
       createSpin.succeed(`Paquete creado: ${pkg._id}`);

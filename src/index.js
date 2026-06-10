@@ -55,6 +55,7 @@ program
   .option("-p, --password <password>", "contraseña admin")
   .option("--bump <type>", "patch | minor | major | none", "patch")
   .option("--no-build", "no re-construir; usar dist/ existente")
+  .option("--no-lint", "saltar el lint previo al build")
   .option("--prerelease", "marcar versión como pre-release", false)
   .option("--changelog <text>", "mensaje de changelog para esta versión")
   .action(require("./commands/publish"));
