@@ -2,7 +2,6 @@ const fs = require("fs");
 const path = require("path");
 const chalk = require("chalk");
 const ora = require("ora");
-const semver = require("semver");
 const {
   findManifest,
   readManifest,
@@ -10,12 +9,18 @@ const {
   validateManifest,
 } = require("../lib/manifest");
 const { buildZip } = require("../lib/zip");
-
-const VALID_BUMPS = ["patch", "minor", "major", "none"];
+const {
+  VALID_BUMPS,
+  isStrictVersion,
+  strictVersionMessage,
+  bumpVersion,
+  syncPackageJson,
+} = require("../lib/version");
 
 async function build(targetPath, opts) {
   const pkgDir = path.resolve(process.cwd(), targetPath || ".");
-  const outDir = path.resolve(pkgDir, opts.output);
+  const outDir = path.resolve(pkgDir, opts.output || "./dist");
+  opts.bump = opts.bump || "none";
 
   if (!fs.existsSync(pkgDir)) {
     console.error(chalk.red("✖"), `No existe: ${pkgDir}`);
@@ -28,7 +33,7 @@ async function build(targetPath, opts) {
 
   let manifestInfo, manifest;
   try {
-    manifestInfo = findManifest(pkgDir);
+    manifestInfo = findManifest(pkgDir, opts.keyName);
     manifest = readManifest(manifestInfo.manifestPath);
   } catch (e) {
     console.error(chalk.red("✖"), e.message);
@@ -54,14 +59,14 @@ async function build(targetPath, opts) {
   let oldVersion = manifest.version || "0.0.0";
   let newVersion = oldVersion;
   if (opts.bump !== "none") {
-    if (!semver.valid(oldVersion)) {
+    if (!isStrictVersion(oldVersion)) {
       console.error(
         chalk.red("✖"),
-        `version actual "${oldVersion}" no es semver válido — corrige antes de bumpear`
+        `No se puede bumpear: ${strictVersionMessage(oldVersion)}`
       );
       process.exit(1);
     }
-    newVersion = semver.inc(oldVersion, opts.bump);
+    newVersion = bumpVersion(oldVersion, opts.bump);
     manifest.version = newVersion;
     writeManifest(manifestInfo.manifestPath, manifest);
     console.log(
@@ -71,23 +76,15 @@ async function build(targetPath, opts) {
   }
 
   // Sync version a package.json si existe
-  const pkgJsonPath = path.join(pkgDir, "package.json");
-  if (fs.existsSync(pkgJsonPath)) {
-    try {
-      const pj = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
-      if (pj.version !== newVersion) {
-        pj.version = newVersion;
-        fs.writeFileSync(pkgJsonPath, JSON.stringify(pj, null, 2) + "\n");
-        console.log(chalk.gray("  sincronizado package.json"));
-      }
-    } catch (_) {}
-  }
+  const sync = syncPackageJson(pkgDir, newVersion);
+  if (sync.changed) console.log(chalk.gray("  sincronizado package.json"));
+  if (sync.warning) console.warn(chalk.yellow("⚠"), sync.warning);
 
   // Build zip
   const spinner = ora("Empaquetando").start();
   let result;
   try {
-    result = buildZip(pkgDir, outDir, newVersion);
+    result = buildZip(pkgDir, outDir, newVersion, { keyName: manifestInfo.keyName });
     spinner.succeed(
       `${manifestInfo.keyName}-${newVersion}.zip — ${formatBytes(result.size)} (${result.entryCount} archivos)`
     );
@@ -105,7 +102,7 @@ async function build(targetPath, opts) {
     chalk.gray("  Para publicar:") + " " + chalk.cyan("alpha-pkg publish --no-build")
   );
 
-  return result;
+  return { ...result, version: newVersion };
 }
 
 function formatBytes(n) {

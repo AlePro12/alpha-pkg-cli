@@ -1,0 +1,13 @@
+# .alphaignore — archivos y carpetas que NO entran al zip que se publica.
+# Una entrada por línea. # para comentarios. Patrones simples:
+#
+#   notas.txt       nombre exacto (archivo o carpeta, a cualquier profundidad)
+#   docs/           carpeta
+#   *.psd           comodín * dentro de un nombre
+#   src/tmp/a.js    con / intermedia: ruta relativa a la raíz del paquete
+#
+# Ya se excluyen siempre (no hace falta listarlos): node_modules/, dist/, .git/,
+# .github/, .claude/, .alpharc, .env, .env.*, .gitignore, .alphaignore, *.log,
+# *.zip y .DS_Store.
+
+# tests/

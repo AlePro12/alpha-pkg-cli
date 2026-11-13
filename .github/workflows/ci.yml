@@ -1,0 +1,55 @@
+# CI del propio CLI: tests en cada push/PR; publica a npm en tags v*.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18", "20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node bin/alpha-pkg.js --help
+
+  publish:
+    name: Publicar en npm
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      - name: El tag debe coincidir con package.json
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "v$PKG_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::el tag $GITHUB_REF_NAME no coincide con package.json (v$PKG_VERSION)"
+            exit 1
+          fi
+      # --access public: el workflow reutilizable baja el CLI con npx sin
+      # credenciales de npm, así que el paquete tiene que ser público.
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

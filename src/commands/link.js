@@ -23,7 +23,7 @@ async function link(targetPath, opts) {
   // Validar que es un paquete Alpha antes de pegarle al desktop
   let manifestInfo, manifest;
   try {
-    manifestInfo = findManifest(pkgDir);
+    manifestInfo = findManifest(pkgDir, opts.keyName);
     manifest = readManifest(manifestInfo.manifestPath);
   } catch (e) {
     console.error(chalk.red("✖"), e.message);

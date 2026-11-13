@@ -3,7 +3,7 @@ const path = require("path");
 const chalk = require("chalk");
 const { findManifest, readManifest, validateManifest } = require("../lib/manifest");
 
-async function lint(targetPath) {
+async function lint(targetPath, opts = {}) {
   const pkgDir = path.resolve(process.cwd(), targetPath || ".");
 
   if (!fs.existsSync(pkgDir)) {
@@ -13,7 +13,7 @@ async function lint(targetPath) {
 
   let manifestInfo;
   try {
-    manifestInfo = findManifest(pkgDir);
+    manifestInfo = findManifest(pkgDir, opts.keyName);
   } catch (e) {
     console.error(chalk.red("✖"), e.message);
     process.exit(1);

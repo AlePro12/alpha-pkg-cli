@@ -1,0 +1,9 @@
+node_modules
+dist
+*.log
+.DS_Store
+.alpharc
+.env
+.env.*
+.alpha-git-token
+.alpha-git-meta.json

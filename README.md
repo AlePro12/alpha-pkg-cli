@@ -26,9 +26,24 @@ alpha-pkg init mi-paquete --template=renderer   # solo UI, sin backend
 alpha-pkg init mi-paquete --template=report     # helper de reporte
 alpha-pkg init mi-paquete --author="Juan Pérez" --description="..."
 alpha-pkg init mi-paquete --yes                 # no preguntar, usar defaults
+alpha-pkg init mi-paquete --target=both         # desktop | saas | both (default desktop)
 ```
 
+`--target` escribe `targets` en el manifiesto (`["desktop"]`, `["saas"]` o ambos).
+Sin TTY (o con `CI=true`) `init` nunca pregunta, igual que con `--yes`.
+
+Además del template, todo paquete nuevo trae `.gitignore`, `.alphaignore` y
+`.github/workflows/release.yml` (release automático, ver [Publicar desde GitHub Actions](#publicar-desde-github-actions)).
+
 **Convención de nombres**: kebab-case (minúsculas + dígitos + guiones). Ej: `inventario-helper`, `factura-electronica`. Esto es el `keyName`, debe ser único en el store.
+
+**Cómo se resuelve el `keyName`** (en `lint`, `build`, `publish`, `link` y `next-version`):
+
+1. el flag `--key-name <keyName>`;
+2. el único archivo `*.appkg` de la carpeta (su nombre sin extensión);
+3. el nombre de la carpeta.
+
+Por eso la carpeta ya no tiene que llamarse igual que el paquete (en CI el checkout lleva el nombre del repo). El zip siempre mete todo bajo `<keyName>/`.
 
 Templates disponibles:
 
@@ -53,8 +68,8 @@ alpha-pkg lint ./mi-paquete # carpeta específica
 
 Reporta:
 
-- **Errores** (bloquean publish): campos requeridos faltantes, semver inválido, archivos referenciados que no existen, schema inválido.
-- **Warnings** (no bloquean): categoría no estándar, `extensions.model` desconocido, sin `main`/`renderer`/`extensions` declarado.
+- **Errores** (bloquean publish): campos requeridos faltantes, `version` que no sea `X.Y.Z` numérico estricto (sin sufijos `-beta`), archivos referenciados que no existen, tipos inválidos en `targets` / `saas` / `products` / `persist` / `restartRequired` / `native` / `minVersion`.
+- **Warnings** (no bloquean): categoría no estándar, `extensions.model` desconocido, sin `main`/`renderer`/`extensions` declarado, target `saas` sin backend o con `config.json` en la raíz.
 
 ### `alpha-pkg build [path]`
 
@@ -68,12 +83,32 @@ alpha-pkg build --output=./dist  # custom output
 alpha-pkg build --no-lint        # saltar lint (no recomendado)
 ```
 
-Produce `./dist/<keyName>-<version>.zip` excluyendo:
+Produce `./dist/<keyName>-<version>.zip` (todo bajo `<keyName>/`) excluyendo siempre:
 
-- `node_modules/`, `dist/`, `.git/`, `*.log`, `.DS_Store`
+- `node_modules/`, `dist/`, `.git/`, `.github/`, `.claude/`
+- `.alpharc`, `.env`, `.env.*` (credenciales), `.gitignore`, `.alphaignore`
+- `*.log`, `*.zip`, `.DS_Store`
 - `.alpha-git-token`, `.alpha-git-meta.json` (sidecars del cliente)
 
-Sincroniza la versión en `package.json` si existe.
+Para excluir algo más, crea un `.alphaignore` en la raíz del paquete: una entrada
+por línea, `#` para comentarios y patrones simples.
+
+```
+# .alphaignore — los comentarios van en su propia línea
+notas.txt
+docs/
+*.psd
+src/tmp/a.js
+```
+
+- `notas.txt` — nombre exacto (archivo o carpeta, a cualquier profundidad)
+- `docs/` — carpeta
+- `*.psd` — comodín `*` dentro de un nombre
+- `src/tmp/a.js` — con `/` intermedia: ruta relativa a la raíz del paquete
+
+No hay negación con `!`. El manifiesto `<keyName>.appkg` nunca se excluye.
+
+Sincroniza la versión en `package.json` si existe (si no puede, avisa con el motivo).
 
 ### `alpha-pkg link [path]`
 
@@ -86,6 +121,7 @@ solo al guardar).
 alpha-pkg link                                 # cwd
 alpha-pkg link ./mi-paquete
 alpha-pkg link --host=http://localhost:4545    # cambiar host de Alpha Admin
+alpha-pkg link -H http://localhost:4545        # forma corta (-h es la ayuda)
 ```
 
 Requisitos:
@@ -108,36 +144,129 @@ alpha-pkg unlink mi-paquete
 Sube el paquete al store. Hace `build` automáticamente (a menos que `--no-build`).
 
 ```bash
-alpha-pkg publish                                       # interactivo
-alpha-pkg publish --bump=minor --changelog="Fix bug X"
+alpha-pkg publish                                       # publica la versión del manifiesto
+alpha-pkg publish --bump=minor --changelog="Fix bug X"  # bumpea y publica
+alpha-pkg publish --version 1.4.3                       # fija la versión y publica
 alpha-pkg publish --no-build                            # usa ./dist/ ya construido
 alpha-pkg publish --prerelease                          # marca como pre-release
+alpha-pkg publish --token aps_xxx --yes --skip-existing --json   # CI
 alpha-pkg publish --store-url=https://store.alphadministrativo.app \
                   --email=admin@example.com --password=...
 ```
 
-Si el paquete no existe en el store, ofrece crearlo desde el manifest local.
+| Flag                             | Qué hace                                                                                              |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `--bump <tipo>`                  | `patch \| minor \| major \| none`. **Default `none`**: no toca el manifiesto.                         |
+| `--version <x.y.z>`              | Fija la versión (escribe el manifiesto y `package.json`) antes del build. No se combina con `--bump`. |
+| `-t, --token <t>`                | Token de API de la tienda (`aps_...`). También `ALPHA_STORE_TOKEN` o `storeToken` en `.alpharc`.      |
+| `-e, --email` / `-p, --password` | Login de admin, solo si no hay token.                                                                 |
+| `-y, --yes` (alias `--ci`)       | Nunca pregunta. Se activa solo con `CI=true` o si stdin no es una terminal.                           |
+| `--skip-existing`                | Si la tienda responde 409 (la versión ya existe), termina con código 0 y un aviso.                    |
+| `--json`                         | Última línea de stdout: `{"keyName":"...","version":"1.4.3","published":true}`.                       |
+| `--prerelease`                   | Marca la versión como pre-release.                                                                    |
+| `--changelog <texto>`            | Changelog de la versión.                                                                              |
+| `--key-name <keyName>`           | Fuerza el keyName.                                                                                    |
+
+**Versiones**: solo `X.Y.Z` numérico estricto. `1.2.3-beta` es un error en `lint`
+y en `publish`; una pre-release es el flag `--prerelease`, no un sufijo.
+
+**Autenticación**:
+
+- **Con token** (`--token` / `ALPHA_STORE_TOKEN`): usa los endpoints de CI de la
+  tienda (`/api/ci/packages/:keyName/...`). El paquete **debe existir ya**: con
+  token nunca se crea (se crea en el panel de la tienda y el token se emite con
+  permiso sobre él).
+- **Sin token**: login de admin email/password. Si el paquete no existe ofrece
+  crearlo desde el manifiesto local (con `--yes` lo crea sin preguntar).
+
+**Modo no interactivo**: si falta una credencial, o el paquete no existe y no
+se puede crear, el comando explica qué falta y termina con código 1. Nunca se
+queda esperando una respuesta.
+
+### `alpha-pkg next-version [dir]`
+
+Pregunta a la tienda qué versión toca publicar. Requiere token de API.
+
+```bash
+VERSION=$(alpha-pkg next-version .)      # stdout = solo la versión, ej. 1.4.3
+alpha-pkg next-version . --json          # {"keyName","version","highest","reason","manifest"}
+alpha-pkg next-version . --token aps_xxx --store-url https://...
+```
+
+Regla (la aplica la tienda): si la versión del manifiesto es mayor que la mayor
+publicada, se usa la del manifiesto (`reason: "manifest"`; así se sube un minor
+o major: edita el manifiesto); si no, patch+1 de la mayor publicada
+(`reason: "patch"`). Paquete sin versiones: la del manifiesto (`reason: "first"`).
+
+## Publicar desde GitHub Actions
+
+`alpha-pkg init` deja en el paquete `.github/workflows/release.yml`, que en cada
+push a `main` llama al workflow reutilizable de este repo:
+
+```yaml
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", ".github/**", "docs/**"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: AlePro12/alpha-pkg-cli/.github/workflows/release-package.yml@main
+    secrets:
+      ALPHA_STORE_TOKEN: ${{ secrets.ALPHA_STORE_TOKEN }}
+```
+
+Puesta en marcha:
+
+1. Crea el paquete en el panel de la tienda y emite un token de API (`aps_...`)
+   con permiso sobre él.
+2. Guárdalo como secreto `ALPHA_STORE_TOKEN` del repo (o de la organización).
+3. Push a `main`.
+
+Qué hace cada corrida (`.github/workflows/release-package.yml`):
+
+1. `alpha-pkg next-version .` → la tienda decide el número.
+2. `alpha-pkg lint`.
+3. `alpha-pkg publish --version $VERSION --yes --skip-existing --json`, con los
+   mensajes de commit desde el último tag como changelog.
+4. Tag `v$VERSION` + GitHub Release con el zip de `dist/`.
+5. Commit de vuelta `chore(release): v$VERSION [skip ci]` con el manifiesto y
+   `package.json`. Si ese push falla (rama protegida, carrera) el release **no**
+   falla: la tienda es la fuente de verdad del número y la siguiente corrida se
+   corrige sola.
+
+Inputs opcionales (`with:`): `store-url`, `cli-version` (default `0.2`),
+`node-version` (default `20`). Para que un push no publique, incluye
+`[skip release]` en el mensaje del commit.
 
 ## Configuración
 
 En orden de precedencia:
 
-1. **Flags CLI** (`--store-url`, `--email`, `--password`)
-2. **Variables de entorno**: `ALPHA_STORE_URL`, `ALPHA_STORE_EMAIL`, `ALPHA_STORE_PASSWORD`
+1. **Flags CLI** (`--store-url`, `--token`, `--email`, `--password`)
+2. **Variables de entorno**: `ALPHA_STORE_URL`, `ALPHA_STORE_TOKEN`, `ALPHA_STORE_EMAIL`, `ALPHA_STORE_PASSWORD`
 3. **`.alpharc`** en cwd
 4. **`.alpharc`** en `$HOME`
 5. Defaults (`storeUrl = https://store.alphadministrativo.app`)
+
+Si hay token, se usa el token; email/password solo se usan cuando no lo hay.
 
 Ejemplo `.alpharc`:
 
 ```json
 {
   "storeUrl": "https://store.alphadministrativo.app",
-  "email": "dev@mi-empresa.com"
+  "email": "dev@mi-empresa.com",
+  "storeToken": "aps_..."
 }
 ```
 
-> **No commits el password en `.alpharc`** si vives en repo público. Mejor `ALPHA_STORE_PASSWORD` en tu shell o keychain del SO.
+> **`.alpharc` nunca va al repo ni al zip**: está en el `.gitignore` que genera `init` y `build` lo excluye siempre. Aun así, mejor `ALPHA_STORE_TOKEN` / `ALPHA_STORE_PASSWORD` en tu shell o keychain del SO. Un `.alpharc` ilegible o con JSON inválido se ignora con un aviso que dice el motivo.
 
 ## Flujo recomendado
 
@@ -152,14 +281,18 @@ git init && git add -A && git commit -m "init"
 # ...editas index.js / renderer/render.js...
 alpha-pkg lint               # antes de cada commit
 alpha-pkg build --bump=none  # probar el zip localmente
+alpha-pkg link               # montarlo en tu Alpha Admin local (DevMode)
 
 # Probar en local (DevMode)
 # 1. activa LocalConfig.DevMode = "true" en tu AlphaAdmin
 # 2. en la tab "Paquetes Personalizados" del store, clona/symlink este repo
 # 3. abre el módulo desde el sidebar
 
-# Publicar al store
+# Publicar al store (a mano)
 alpha-pkg publish --bump=patch --changelog="Bugfix descripción"
+
+# ...o automático: push a main y el workflow de release publica solo
+git push origin main
 ```
 
 ## Estructura generada
@@ -172,7 +305,9 @@ mi-paquete/
 │   └── render.js        # frontend (function __Module)
 ├── package.json         # si tienes deps npm
 ├── .encryptIgnore       # patrones a no encriptar al publicar (opcional)
+├── .alphaignore         # qué NO entra al zip (además de las exclusiones fijas)
 ├── .gitignore
+├── .github/workflows/release.yml   # release automático en push a main
 └── README.md
 ```
 
@@ -186,7 +321,7 @@ repo del cliente: `docs/Contexto - Extensiones JS.md`.
 
 ## El manifest `.appkg`
 
-Vive **dentro** de la carpeta (`mi-paquete/mi-paquete.appkg`). Es JSON puro.
+Vive en la raíz del paquete (`mi-paquete.appkg`). Es JSON puro.
 
 ```json
 {
@@ -210,12 +345,8 @@ Vive **dentro** de la carpeta (`mi-paquete/mi-paquete.appkg`). Es JSON puro.
       "Icon": "ph:cube"
     }
   ],
-  "downbar": [
-    /* widgets en barra inferior, opcional */
-  ],
-  "extensions": [
-    /* inject de campos en Facturas/Compras, opcional */
-  ]
+  "downbar": [/* widgets en barra inferior, opcional */],
+  "extensions": [/* inject de campos en Facturas/Compras, opcional */]
 }
 ```
 
@@ -229,6 +360,22 @@ Vive **dentro** de la carpeta (`mi-paquete/mi-paquete.appkg`). Es JSON puro.
 | `Icon`          | iconify id (recomendado `ph:*` Phosphor)                               |
 | `requiresCores` | el cliente solo descarga si `Empresa.Cores` los incluye                |
 | `npmInstall`    | si `true`, el cliente corre `npm install` tras descomprimir            |
+
+Campos opcionales de distribución:
+
+| Campo             | Tipo / valores                           | Significado                                                                                     |
+| ----------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `targets`         | array de `"desktop"` \| `"saas"`         | Dónde corre el paquete. Default implícito `["desktop"]`.                                        |
+| `saas`            | `{ "main"?: [...], "renderer"?: [...] }` | `main`/`renderer` específicos para SaaS (misma forma que los de raíz; se validan los archivos). |
+| `products`        | array de strings                         | Productos Alpha donde aplica. Default implícito `["alphaAdmin"]`.                               |
+| `persist`         | array de rutas relativas                 | Rutas del paquete que sobreviven a una actualización. Sin `..` ni rutas absolutas.              |
+| `restartRequired` | boolean                                  | El paquete necesita reiniciar Alpha tras instalar/actualizar.                                   |
+| `native`          | boolean                                  | Paquete con componentes nativos.                                                                |
+| `minVersion`      | `X.Y.Z`                                  | Versión mínima de Alpha Administrativo.                                                         |
+
+Con target `saas`: el estado **no** va en la carpeta del paquete (un `config.json`
+en la raíz genera warning) sino en la BD de la organización; y si no hay
+`saas.main` ni `main`, `lint` avisa que no habrá backend en SaaS.
 
 `routePath` y `opcFile` declaran `.js` aunque el store los encripte a `.js-alpcrt`
 — el desktop resuelve ambos automáticamente. **No declares `.js-alpcrt`**.
@@ -572,6 +719,8 @@ Para iterar sin re-publicar tras cada cambio:
 ## Checklist antes de publicar
 
 - [ ] `alpha-pkg lint` pasa sin errores
+- [ ] `version` es `X.Y.Z` (sin sufijos) y `targets` declara dónde corre
+- [ ] `unzip -l dist/<keyName>-<version>.zip` no trae nada que no deba ir (usa `.alphaignore`)
 - [ ] Una sola `function __Module` por archivo, todo adentro
 - [ ] Sub-componentes con estado en `useMemo`
 - [ ] Callbacks a subs con `useCallback`
@@ -587,16 +736,21 @@ Para iterar sin re-publicar tras cada cambio:
 
 ### CLI
 
-| Error                                   | Causa probable                                                                                                |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `No se encontró <keyName>.appkg`        | El manifest no vive dentro de la carpeta. Mover.                                                              |
-| `version no es semver`                  | Editar manifest manualmente con un formato válido (ej. `1.0.0`).                                              |
-| `Login falló (401)`                     | Credenciales admin incorrectas o el store no tiene admins seeded.                                             |
-| `Buscar package falló (401)`            | Token expiró. Vuelve a correr `publish`.                                                                      |
-| `Upload falló (400) zip inválido`       | El zip no contiene `<keyName>.appkg` adentro. Verifica con `unzip -l dist/...`.                               |
-| `No se pudo contactar Alpha Admin en X` | El cliente no está corriendo, o `--host` apunta a un puerto erróneo (default 4545).                           |
-| `DevMode no está habilitado`            | Activa `DevMode = true` en Configuración del cliente, o `export ALPHA_DEV_MODE=true` antes de arrancar Alpha. |
-| `EPERM al crear symlink` (Windows)      | Habilita "Developer Mode" del SO o corre Alpha Admin como administrador.                                      |
+| Error                                     | Causa probable                                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `No se encontró ningún manifiesto .appkg` | Falta `<keyName>.appkg` en la raíz del paquete (o pasaste una carpeta equivocada).                            |
+| `Hay varios manifiestos ... --key-name`   | Hay más de un `.appkg` y ninguno se llama como la carpeta: indica cuál con `--key-name`.                      |
+| `versión "..." inválida: debe ser X.Y.Z`  | Solo `X.Y.Z` numérico (ej. `1.0.0`). Sin sufijos: para pre-release usa `--prerelease`.                        |
+| `Faltan credenciales para publicar`       | Modo no interactivo sin token ni email/password. Define `ALPHA_STORE_TOKEN` (CI) o email + password.          |
+| `Token de API inválido o vencido (401)`   | Revisa el secreto `ALPHA_STORE_TOKEN` (empieza por `aps_`).                                                   |
+| `El paquete "x" no existe en la tienda`   | Con token no se crean paquetes: créalo en el panel y da permiso al token sobre él.                            |
+| `La versión X ya existe en la tienda`     | 409. Sube la versión (`--version` / `--bump`) o usa `--skip-existing`.                                        |
+| `Login falló (401)`                       | Credenciales admin incorrectas o el store no tiene admins seeded.                                             |
+| `Buscar package falló (401)`              | Token expiró. Vuelve a correr `publish`.                                                                      |
+| `Upload falló (400) zip inválido`         | El zip no contiene `<keyName>.appkg` adentro. Verifica con `unzip -l dist/...`.                               |
+| `No se pudo contactar Alpha Admin en X`   | El cliente no está corriendo, o `--host` apunta a un puerto erróneo (default 4545).                           |
+| `DevMode no está habilitado`              | Activa `DevMode = true` en Configuración del cliente, o `export ALPHA_DEV_MODE=true` antes de arrancar Alpha. |
+| `EPERM al crear symlink` (Windows)        | Habilita "Developer Mode" del SO o corre Alpha Admin como administrador.                                      |
 
 ### Renderer
 

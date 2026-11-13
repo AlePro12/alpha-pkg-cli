@@ -1,0 +1,163 @@
+# Workflow reutilizable: publica un paquete Alpha en AlphaStore.
+#
+# Lo llaman los repos de paquetes (lo genera `alpha-pkg init`):
+#
+#   jobs:
+#     release:
+#       uses: AlePro12/alpha-pkg-cli/.github/workflows/release-package.yml@main
+#       secrets:
+#         ALPHA_STORE_TOKEN: ${{ secrets.ALPHA_STORE_TOKEN }}
+#
+# La tienda es la fuente de verdad del número de versión: `next-version` lo
+# pide, `publish --version` lo escribe en el manifiesto y lo sube. El commit de
+# vuelta al repo es solo cosmético; si falla, la siguiente corrida se corrige.
+#
+# El repo que llama debe dar `permissions: contents: write` (tag + release +
+# commit del manifiesto).
+name: Release de paquete Alpha
+
+on:
+  workflow_call:
+    inputs:
+      store-url:
+        description: URL de la tienda (vacío = la de producción)
+        type: string
+        required: false
+        default: ""
+      cli-version:
+        description: Versión de @alphasoft/alpha-pkg a usar
+        type: string
+        required: false
+        default: "0.2"
+      node-version:
+        description: Versión de Node.js
+        type: string
+        required: false
+        default: "20"
+    secrets:
+      ALPHA_STORE_TOKEN:
+        description: Token de API de la tienda (aps_...) con permiso sobre el paquete
+        required: true
+    outputs:
+      version:
+        description: Versión publicada
+        value: ${{ jobs.release.outputs.version }}
+      published:
+        description: '"true" si se subió una versión nueva'
+        value: ${{ jobs.release.outputs.published }}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publicar en AlphaStore
+    runs-on: ubuntu-latest
+    # No publicar los commits del propio workflow ni los marcados [skip release]
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      !contains(github.event.head_commit.message, '[skip release]')
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.publish.outputs.published }}
+    env:
+      ALPHA_STORE_TOKEN: ${{ secrets.ALPHA_STORE_TOKEN }}
+      ALPHA_STORE_URL: ${{ inputs.store-url }}
+      CLI_VERSION: ${{ inputs.cli-version }}
+      CI: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Calcular versión
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(npx --yes "@alphasoft/alpha-pkg@${CLI_VERSION}" next-version .)
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::next-version devolvió algo que no es X.Y.Z: '$VERSION'"
+            exit 1
+          fi
+          echo "Versión a publicar: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Lint
+        run: npx --yes "@alphasoft/alpha-pkg@${CLI_VERSION}" lint .
+
+      - name: Changelog (commits desde el último tag)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$LAST_TAG" ]; then RANGE="$LAST_TAG..HEAD"; else RANGE="HEAD"; fi
+          git log --no-merges --max-count=50 --pretty='- %s' "$RANGE" \
+            | grep -v -F '[skip ci]' > "$RUNNER_TEMP/changelog.md" || true
+          if [ ! -s "$RUNNER_TEMP/changelog.md" ]; then
+            echo "- Release $VERSION" > "$RUNNER_TEMP/changelog.md"
+          fi
+          cat "$RUNNER_TEMP/changelog.md"
+
+      - name: Publicar en la tienda
+        id: publish
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          npx --yes "@alphasoft/alpha-pkg@${CLI_VERSION}" publish . \
+            --version "$VERSION" --yes --skip-existing --json \
+            --changelog "$(cat "$RUNNER_TEMP/changelog.md")" | tee "$RUNNER_TEMP/publish.log"
+          PUBLISHED=$(tail -n 1 "$RUNNER_TEMP/publish.log" \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.parse(s).published===true?"true":"false")})')
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+
+      - name: Tag y GitHub Release
+        if: steps.publish.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" dist/*-"$VERSION".zip \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/changelog.md"
+
+      # La tienda ya tiene la versión: si este push falla (rama protegida,
+      # carrera con otro push) no se rompe el release; la siguiente corrida
+      # vuelve a pedir el número a la tienda y se corrige sola.
+      - name: Commit de la versión al repo
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -uo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- ./*.appkg
+          if [ -f package.json ]; then git add -- package.json; fi
+          if git diff --cached --quiet; then
+            echo "El manifiesto ya está en v$VERSION: nada que commitear"
+            exit 0
+          fi
+          git commit -m "chore(release): v$VERSION [skip ci]"
+          for intento in 1 2; do
+            if git pull --rebase origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME"; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "::warning::push del manifiesto falló (intento $intento)"
+            sleep 5
+          done
+          exit 1

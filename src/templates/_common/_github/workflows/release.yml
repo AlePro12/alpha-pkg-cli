@@ -1,0 +1,22 @@
+# Publica {keyName} en AlphaStore en cada push a main.
+#
+# La versión la decide la tienda (la mayor publicada + 1, o la del manifiesto
+# si es mayor). Requiere el secreto ALPHA_STORE_TOKEN: un token de API de la
+# tienda (empieza por aps_) con permiso sobre este paquete.
+#
+# Para que un push NO publique, incluye [skip release] en el mensaje del commit.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', '.github/**', 'docs/**']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: AlePro12/alpha-pkg-cli/.github/workflows/release-package.yml@main
+    secrets:
+      ALPHA_STORE_TOKEN: ${{ secrets.ALPHA_STORE_TOKEN }}

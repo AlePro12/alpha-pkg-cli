@@ -3,6 +3,8 @@ const path = require("path");
 const chalk = require("chalk");
 const prompts = require("prompts");
 const { copyTemplate, pascalCase } = require("../lib/template");
+const { readManifest, writeManifest } = require("../lib/manifest");
+const { isNonInteractive } = require("../lib/interactive");
 
 const VALID_TEMPLATES = [
   "fullstack",
@@ -13,6 +15,11 @@ const VALID_TEMPLATES = [
   "importer",
   "downbar",
 ];
+const TARGET_MAP = {
+  desktop: ["desktop"],
+  saas: ["saas"],
+  both: ["desktop", "saas"],
+};
 const KEYNAME_RE = /^[a-z][a-z0-9-]*[a-z0-9]$/;
 
 async function init(name, opts) {
@@ -34,6 +41,16 @@ async function init(name, opts) {
     process.exit(1);
   }
 
+  // Validar target
+  const target = opts.target || "desktop";
+  if (!TARGET_MAP[target]) {
+    console.error(
+      chalk.red("✖"),
+      `--target "${target}" no existe. Opciones: ${Object.keys(TARGET_MAP).join(", ")}`
+    );
+    process.exit(1);
+  }
+
   // Verificar que no exista la carpeta destino
   const destDir = path.resolve(process.cwd(), name);
   if (fs.existsSync(destDir)) {
@@ -45,7 +62,7 @@ async function init(name, opts) {
   let author = opts.author;
   let description = opts.description;
 
-  if (!opts.yes && (!author || !description)) {
+  if (!isNonInteractive(opts) && (!author || !description)) {
     const answers = await prompts(
       [
         !author && {
@@ -78,15 +95,24 @@ async function init(name, opts) {
   console.log(chalk.cyan("Generando paquete:"));
   console.log(`  ${chalk.gray("nombre   ")} ${chalk.bold(name)}`);
   console.log(`  ${chalk.gray("template ")} ${opts.template}`);
+  console.log(`  ${chalk.gray("target   ")} ${TARGET_MAP[target].join(", ")}`);
   console.log(`  ${chalk.gray("destino  ")} ${destDir}`);
   console.log("");
 
   try {
-    copyTemplate(srcDir, destDir, {
+    const vars = {
       keyName: name,
       author: author || "AlphaSoft, C.A.",
       description: description || "Paquete Alpha",
+    };
+    copyTemplate(srcDir, destDir, vars);
+    // Archivos comunes a todos los templates: .gitignore, .alphaignore y el
+    // workflow de release (no pisan lo que traiga el template).
+    copyTemplate(path.join(__dirname, "..", "templates", "_common"), destDir, vars, {
+      dotfiles: true,
+      overwrite: false,
     });
+    writeTargets(path.join(destDir, `${name}.appkg`), TARGET_MAP[target]);
   } catch (e) {
     console.error(chalk.red("✖"), `Error generando archivos: ${e.message}`);
     process.exit(1);
@@ -104,9 +130,32 @@ async function init(name, opts) {
   console.log(`  ${chalk.cyan("alpha-pkg publish")}           ${chalk.gray("# sube al store")}`);
   console.log("");
   console.log(
+    chalk.gray("Release automático: ") +
+      chalk.gray.italic(".github/workflows/release.yml") +
+      chalk.gray(" publica en cada push a main (secreto ALPHA_STORE_TOKEN).")
+  );
+  console.log(
     chalk.gray("Probar en local: copia o symlink a ") +
       chalk.gray.italic("<ALPHAADMINFILES>/packages/" + name + "/")
   );
 }
 
+/** Escribe `targets` en el manifiesto recién generado (después de `category`). */
+function writeTargets(manifestPath, targets) {
+  const manifest = readManifest(manifestPath);
+  const out = {};
+  let placed = false;
+  for (const [k, v] of Object.entries(manifest)) {
+    if (k === "targets") continue;
+    out[k] = v;
+    if (k === "category") {
+      out.targets = targets;
+      placed = true;
+    }
+  }
+  if (!placed) out.targets = targets;
+  writeManifest(manifestPath, out);
+}
+
 module.exports = init;
+module.exports.TARGET_MAP = TARGET_MAP;
